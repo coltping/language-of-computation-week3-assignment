@@ -1,7 +1,5 @@
 # Rules for loading books
 
-> **DRAFT. Review and rewrite in your own words before Part 4.** The four main decisions are mine. They're marked ✔ and come from my answers to Claude. Everything else is Claude's suggestion, built around those decisions, and is marked ✎. Change anything I disagree with.
-
 These rules decide what happens to every row of a books CSV file when it is loaded into `books.db`. The problems they refer to are described in `data-validation.md`.
 
 ## 1. What counts as a valid ISBN
@@ -16,54 +14,54 @@ These rules decide what happens to every row of a books CSV file when it is load
 
 There are three possible outcomes for a value:
 
-- **Repair + warn.** The fix is certain because the check digit confirms it. Load the repaired value and log a warning showing the original value. ✔
-- **Load without that ISBN + warn.** Any fix would be a guess. Load the book, leave that ISBN empty, and log a warning showing the bad value, so a person can look it up. ✔ A wrong ISBN in the database is worse than an empty one, because it would make two different books look like the same book.
-- **Reject.** The row is not loaded at all, and the reason goes in the log. This applies only to the cases in section 4. ✎
+- **Repair + warn.** The fix is certain because the check digit confirms it. Load the repaired value and log a warning showing the original value.
+- **Load without that ISBN + warn.** Any fix would be a guess. Load the book, leave that ISBN empty, and log a warning showing the bad value, so a person can look it up. A wrong ISBN in the database is worse than an empty one, because it would make two different books look like the same book.
+- **Reject.** The row is not loaded at all, and the reason goes in the log. This applies only to the cases in section 4.
 
 | Problem (see data-validation.md) | Outcome | Why |
 |---|---|---|
-| Leading zeros dropped from ISBN-10 (8 or 9 digits, or 7 or fewer) | Repair: add zeros on the left to make 10, **only if** the result passes the check digit ✔ | The check digit proves the repair is right |
-| Lowercase `x` at the end | Repair: make it uppercase, only if the result passes ✔ | Same |
-| Hyphens or spaces, inside or around the value | Repair: remove them, only if the result passes ✔ | Same; hyphens and spaces carry no meaning |
-| A valid ISBN-13 in the ISBN-10 column | Repair: use it as the ISBN-13 ✔ | It passes the ISBN-13 check; it's just in the wrong column |
-| ISBN-13 in scientific notation (e.g. `9.78043902348e+12`) **with** a valid ISBN-10 that matches it | Repair: build the ISBN-13 from the ISBN-10 ✔ | The ISBN-10 has every digit; the rounded value only confirms it |
-| ISBN-13 in scientific notation **without** a valid ISBN-10 | Load without ISBN-13 + warn ✔ | The check digit is gone and the 12th digit may be rounded, so any rebuild is a guess. ✎ This includes the 55 rows where only one answer fits the rounding. Rebuilding those depends on assuming *how* the supplier rounded, and I don't want to rely on that. |
-| ISBN-13 with `978` cut off (10 digits that fail the ISBN-10 check but pass as `978` + value) | Load without ISBN + warn ✔ | It is very likely the right ISBN, but it is still an inference |
-| Wrong check digit (ISBN-10 or ISBN-13) | Load without that ISBN + warn ✔ | At least one digit is wrong, and nothing says which |
-| Letter in the middle (e.g. `04390A3483`) | Load without ISBN + warn ✔ | The obvious "fix" turns it into another book's ISBN |
-| Wrong length after cleaning (e.g. 11 digits) | Load without ISBN + warn ✔ | The obvious "fix" turns it into another book's ISBN |
-| Too short **and** fails the check after adding zeros | Load without ISBN + warn ✔ | Padding doesn't make it valid, so some digit is wrong |
-| ISBN-10 and ISBN-13 are both valid but **disagree** (they aren't twins) | Load with **neither** ISBN + warn ✔ | They can't both belong to this book, and I can't tell which is right |
-| `isbn13` holds something that is not an ISBN-13 at all: a UPC barcode, prefix other than 978/979, a truncated value, or a decimal like `195170342.0` | Ignore that value + warn. Still use a valid ISBN-10 from the same row. ✎ | It's a different kind of code, not a wrong ISBN, so it shouldn't cancel a good ISBN-10 |
-| Both ISBN columns empty | Load without ISBN + warn ✎ | Many real books in the file have no ISBN; they are still books |
+| Leading zeros dropped from ISBN-10 (8 or 9 digits, or 7 or fewer) | Repair: add zeros on the left to make 10, **only if** the result passes the check digit | The check digit proves the repair is right |
+| Lowercase `x` at the end | Repair: make it uppercase, only if the result passes | Same |
+| Hyphens or spaces, inside or around the value | Repair: remove them, only if the result passes | Same; hyphens and spaces carry no meaning |
+| A valid ISBN-13 in the ISBN-10 column | Repair: use it as the ISBN-13 | It passes the ISBN-13 check; it's just in the wrong column |
+| ISBN-13 in scientific notation (e.g. `9.78043902348e+12`) **with** a valid ISBN-10 that matches it | Repair: build the ISBN-13 from the ISBN-10 | The ISBN-10 has every digit; the rounded value only confirms it |
+| ISBN-13 in scientific notation **without** a valid ISBN-10 | Load without ISBN-13 + warn | The check digit is gone and the 12th digit may be rounded, so any rebuild is a guess. This includes the 55 rows where only one answer fits the rounding. Rebuilding those depends on assuming *how* the supplier rounded, and I don't want to rely on that. |
+| ISBN-13 with `978` cut off (10 digits that fail the ISBN-10 check but pass as `978` + value) | Load without ISBN + warn | It is very likely the right ISBN, but it is still an inference |
+| Wrong check digit (ISBN-10 or ISBN-13) | Load without that ISBN + warn | At least one digit is wrong, and nothing says which |
+| Letter in the middle (e.g. `04390A3483`) | Load without ISBN + warn | The obvious "fix" turns it into another book's ISBN |
+| Wrong length after cleaning (e.g. 11 digits) | Load without ISBN + warn | The obvious "fix" turns it into another book's ISBN |
+| Too short **and** fails the check after adding zeros | Load without ISBN + warn | Padding doesn't make it valid, so some digit is wrong |
+| ISBN-10 and ISBN-13 are both valid but **disagree** (they aren't twins) | Load with **neither** ISBN + warn | They can't both belong to this book, and I can't tell which is right |
+| `isbn13` holds something that is not an ISBN-13 at all: a UPC barcode, prefix other than 978/979, a truncated value, or a decimal like `195170342.0` | Ignore that value + warn. Still use a valid ISBN-10 from the same row. | It's a different kind of code, not a wrong ISBN, so it shouldn't cancel a good ISBN-10 |
+| Both ISBN columns empty | Load without ISBN + warn | Many real books in the file have no ISBN; they are still books |
 
 **When is a repair really a guess?** When more than one ISBN could be the "real" one, or when nothing (no check digit, no second column) confirms the fix. A repair is only certain when the repaired value passes its check digit **and** does not contradict the other ISBN column.
 
 ## 3. What makes two rows the same book
 
-- **Two rows are the same book when they have the same ISBN-13** after the repairs in section 2. ✔
-- ✎ Rounded scientific-notation text is **never** compared as written. 262 different books share rounded values.
-- **A book with no usable ISBN** is matched by its supplier `book_id` instead. ✎ Both deliveries come from the same supplier and use the same ids.
-- **Conflicts:** ✎
+- **Two rows are the same book when they have the same ISBN-13** after the repairs in section 2.
+- Rounded scientific-notation text is **never** compared as written. 262 different books share rounded values.
+- **A book with no usable ISBN** is matched by its supplier `book_id` instead. Both deliveries come from the same supplier and use the same ids.
+- **Conflicts:**
   - Same ISBN-13 as a book already in the database, but a **different book_id**, e.g. *Paper Moons* (10013) using *Angels & Demons'* ISBN. The ISBN can't belong to both, so load the new row **without** the ISBN and warn, naming the book that already has it. This follows the "guess" rule: we don't know which book is wrong, so we don't attach the ISBN twice.
   - Same book_id as a book in the database, but a **different valid ISBN-13**. Reject the row, with the reason "book_id already belongs to a different ISBN". A person has to decide which is right.
 - **The same book twice in one file** (e.g. 10001): the first copy is loaded, and the second is treated like any book that "arrives again" (section 4).
 
 ## 4. When a book that is already in the database arrives again
 
-- **Nothing changed:** skip the row and count it as *skipped – already exists*. Running the same file twice therefore loads nothing new the second time. ✔
-- **Something changed** (e.g. rating counts went up, or an ISBN that was broken is now valid): update the changed fields and count the row as *updated*. ✔
-- **Never downgrade an ISBN:** if the database already has a valid ISBN and the new row's ISBN is empty or unusable, keep the old ISBN, update the other changed fields, and warn. Example: *Harry Potter and the Deathly Hallows* (25) arrives in batch 2 with no ISBNs. ✔
-- ✎ Never downgrade other required fields either: an empty title never overwrites an existing title.
+- **Nothing changed:** skip the row and count it as *skipped – already exists*. Running the same file twice therefore loads nothing new the second time.
+- **Something changed** (e.g. rating counts went up, or an ISBN that was broken is now valid): update the changed fields and count the row as *updated*.
+- **Never downgrade an ISBN:** if the database already has a valid ISBN and the new row's ISBN is empty or unusable, keep the old ISBN, update the other changed fields, and warn. Example: *Harry Potter and the Deathly Hallows* (25) arrives in batch 2 with no ISBNs.
+- Never downgrade other required fields either: an empty title never overwrites an existing title.
 
-**Rows that are rejected** ✎ (the only cases where a book is not loaded):
+**Rows that are rejected** (the only cases where a book is not loaded):
 
 1. `book_id` is missing or not a whole number.
 2. `title` is empty.
 3. The book_id conflict in section 3.
 4. The line can't be read as a row of the CSV, e.g. the wrong number of columns.
 
-## 5. What the report must tell the person reading it the next morning ✎
+## 5. What the report must tell the person reading it the next morning
 
 For each run, newest first:
 
