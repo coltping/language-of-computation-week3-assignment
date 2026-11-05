@@ -1,0 +1,2 @@
+# Store the CSV deliveries byte-for-byte, with no line-ending conversion
+*.csv -text
