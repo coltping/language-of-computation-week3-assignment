@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ingestion Report</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1d2430; --muted: #5d6878; --line: #dde2e8;
+    --accent: #2f5bd3; --ok: #1f7a4a; --ok-bg: #e5f4ec; --warn: #8a5a00; --warn-bg: #fdf1d8;
+    --bad: #b42318; --bad-bg: #fde7e5; --code: #eef1f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161c; --card: #1b2129; --text: #e4e8ee; --muted: #9aa5b4; --line: #2c3440;
+      --accent: #7ea2ff; --ok: #6fd39c; --ok-bg: #16301f; --warn: #f2c063; --warn-bg: #352a12;
+      --bad: #ff8a80; --bad-bg: #3a1a18; --code: #242b35;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .open { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 24px; }
+  button, .btn { font: inherit; background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+                 padding: 9px 16px; cursor: pointer; }
+  .btn.secondary { background: transparent; color: var(--accent); border: 1px solid var(--line); padding: 6px 12px; }
+  #status { color: var(--muted); }
+  .run { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 20px; }
+  .run h2 { font-size: 1.15rem; margin: 0; }
+  .meta { color: var(--muted); font-size: .9rem; margin: 2px 0 14px; word-break: break-all; }
+  .tag { display: inline-block; font-size: .78rem; font-weight: 600; border-radius: 999px; padding: 1px 9px; margin-left: 8px; vertical-align: middle; }
+  .tag.latest { background: var(--code); color: var(--muted); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .tile { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .tile .n { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .tile .l { color: var(--muted); font-size: .85rem; }
+  .tile.bad .n { color: var(--bad); } .tile.warn .n { color: var(--warn); }
+  .verdict { border-radius: 8px; padding: 8px 12px; margin: 6px 0; font-weight: 600; }
+  .verdict.ok { background: var(--ok-bg); color: var(--ok); }
+  .verdict.warn { background: var(--warn-bg); color: var(--warn); }
+  .verdict.bad { background: var(--bad-bg); color: var(--bad); }
+  details { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+  summary { cursor: pointer; font-weight: 600; }
+  .kinds { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+  .kind { font: inherit; font-size: .82rem; background: var(--code); color: var(--text); border: 1px solid var(--line);
+          border-radius: 999px; padding: 2px 10px; cursor: pointer; }
+  .kind.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  input[type=search] { font: inherit; width: 100%; max-width: 360px; padding: 7px 10px; border: 1px solid var(--line);
+                       border-radius: 8px; background: var(--card); color: var(--text); margin: 6px 0 10px; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: .88rem; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  code { background: var(--code); border-radius: 4px; padding: 0 4px; font-size: .85rem; white-space: pre; }
+  .more { margin-top: 10px; }
+  .empty { color: var(--muted); font-style: italic; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Ingestion report</h1>
+  <p class="sub">Shows every run recorded in <code>ingestion-log.json</code>, newest first.</p>
+  <div class="open">
+    <label class="btn" for="file">Open ingestion-log.json</label>
+    <input id="file" type="file" accept=".json,application/json" hidden>
+    <span id="status">No log loaded yet.</span>
+  </div>
+  <div id="runs"></div>
+</main>
+
+<script>
+const PAGE = 200;
+const $ = (tag, attrs = {}, ...kids) => {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") el.className = v; else if (k.startsWith("on")) el.addEventListener(k.slice(2), v); else el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) el.append(kid instanceof Node ? kid : document.createTextNode(kid ?? ""));
+  return el;
+};
+const fmt = n => Number(n ?? 0).toLocaleString();
+const code = v => (v === null || v === undefined || v === "") ? $("span", { class: "empty" }, "(empty)") : $("code", {}, String(v));
+
+document.getElementById("file").addEventListener("change", e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const runs = JSON.parse(reader.result);
+      if (!Array.isArray(runs)) throw new Error("the file is not a list of runs");
+      render(runs);
+      document.getElementById("status").textContent = `${f.name}: ${runs.length} run${runs.length === 1 ? "" : "s"}`;
+    } catch (err) {
+      document.getElementById("runs").replaceChildren();
+      document.getElementById("status").textContent = `Could not read ${f.name}: ${err.message}`;
+    }
+  };
+  reader.readAsText(f);
+});
+
+function render(runs) {
+  const box = document.getElementById("runs");
+  box.replaceChildren();
+  runs.map((r, i) => ({ r, n: i + 1 })).reverse().forEach(({ r, n }, idx) => box.append(renderRun(r, n, idx === 0)));
+}
+
+function verdicts(r) {
+  const c = r.counts || {};
+  const out = [];
+  if (r.error) out.push(["bad", `Run failed: ${r.error}`]);
+  if (!r.adds_up) out.push(["bad", `Counts do not add up: read ${fmt(c.read)} ≠ loaded + updated + skipped + rejected.`]);
+  if (!r.error) {
+    if (c.rejected > 0) out.push(["bad", `${fmt(c.rejected)} row${c.rejected === 1 ? "" : "s"} rejected: action needed.`]);
+    else if (r.adds_up) out.push(["ok", "All rows accounted for, nothing rejected."]);
+    if (c.rows_with_warnings > 0) out.push(["warn", `${fmt(c.rows_with_warnings)} row${c.rows_with_warnings === 1 ? "" : "s"} loaded with warnings: review.`]);
+  }
+  return out;
+}
+
+function renderRun(r, n, latest) {
+  const c = r.counts || {};
+  const when = new Date(r.run_at);
+  const tiles = [
+    ["Read", c.read], ["Loaded (new)", c.loaded], ["Updated", c.updated],
+    ["Skipped (already exist)", c.skipped_already_exist],
+    ["Rejected", c.rejected, c.rejected > 0 ? "bad" : ""],
+    ["Rows with warnings", c.rows_with_warnings, c.rows_with_warnings > 0 ? "warn" : ""],
+  ];
+  return $("section", { class: "run" },
+    $("h2", {}, `Run ${n}: ${r.file}`, latest ? $("span", { class: "tag latest" }, "latest") : ""),
+    $("div", { class: "meta" }, `${isNaN(when) ? r.run_at : when.toLocaleString()} · ${r.run_at} · ${r.file_path || ""}`),
+    $("div", { class: "tiles" }, tiles.map(([l, v, cls]) => $("div", { class: `tile ${cls || ""}` }, $("div", { class: "n" }, fmt(v)), $("div", { class: "l" }, l)))),
+    verdicts(r).map(([cls, text]) => $("div", { class: `verdict ${cls}` }, text)),
+    rejectedSection(r.rejected_rows || []),
+    warningSection(r.warnings || []),
+  );
+}
+
+function rejectedSection(rows) {
+  const d = $("details", rows.length ? { open: "" } : {}, $("summary", {}, `Rejected rows (${fmt(rows.length)})`));
+  if (!rows.length) { d.append($("p", { class: "empty" }, "No rows were rejected.")); return d; }
+  d.append($("div", { class: "scroll" }, $("table", {},
+    $("thead", {}, $("tr", {}, ["Line", "book_id", "Title", "Value", "Reason", "What to do"].map(h => $("th", {}, h)))),
+    $("tbody", {}, rows.map(x => $("tr", {},
+      $("td", { class: "num" }, x.line), $("td", { class: "num" }, x.book_id), $("td", {}, x.title),
+      $("td", {}, code(x.value)), $("td", {}, x.reason), $("td", {}, x.action)))))));
+  return d;
+}
+
+function warningSection(ws) {
+  const rows = new Set(ws.map(w => `${w.line}`)).size;
+  const d = $("details", {}, $("summary", {}, `Warnings (${fmt(ws.length)} on ${fmt(rows)} row${rows === 1 ? "" : "s"})`));
+  if (!ws.length) { d.append($("p", { class: "empty" }, "No warnings.")); return d; }
+
+  const kinds = new Map();
+  ws.forEach(w => { const k = `${w.outcome}: ${w.code}`; kinds.set(k, (kinds.get(k) || 0) + 1); });
+  let active = null, query = "", shown = PAGE;
+  const chips = $("div", { class: "kinds" });
+  const search = $("input", { type: "search", placeholder: "Filter by book_id, title or value…" });
+  const tbody = $("tbody");
+  const more = $("div", { class: "more" });
+
+  const draw = () => {
+    const q = query.trim().toLowerCase();
+    const hits = ws.filter(w => (!active || `${w.outcome}: ${w.code}` === active) &&
+      (!q || `${w.book_id} ${w.title} ${w.original} ${w.new_value ?? ""}`.toLowerCase().includes(q)));
+    tbody.replaceChildren(...hits.slice(0, shown).map(w => $("tr", {},
+      $("td", { class: "num" }, w.line), $("td", { class: "num" }, w.book_id), $("td", {}, w.title),
+      $("td", {}, w.column), $("td", {}, code(w.original)),
+      $("td", {}, w.outcome, w.new_value ? [" → ", code(w.new_value)] : ""), $("td", {}, w.reason))));
+    more.replaceChildren(`Showing ${fmt(Math.min(shown, hits.length))} of ${fmt(hits.length)}. `,
+      hits.length > shown ? $("button", { class: "btn secondary", onclick: () => { shown += PAGE * 5; draw(); } }, "Show more") : "");
+  };
+  [...kinds.entries()].sort((a, b) => b[1] - a[1]).forEach(([k, v]) => {
+    const chip = $("button", { class: "kind", onclick: () => {
+      active = active === k ? null : k; shown = PAGE;
+      chips.querySelectorAll(".kind").forEach(c => c.classList.toggle("on", c === chip && active === k)); draw();
+    } }, `${k} (${fmt(v)})`);
+    chips.append(chip);
+  });
+  search.addEventListener("input", () => { query = search.value; shown = PAGE; draw(); });
+  d.append($("p", { class: "sub" }, "Click a kind to show only those warnings."), chips, search,
+    $("div", { class: "scroll" }, $("table", {},
+      $("thead", {}, $("tr", {}, ["Line", "book_id", "Title", "Column", "Original value", "What was done", "Reason"].map(h => $("th", {}, h)))),
+      tbody)), more);
+  draw();
+  return d;
+}
+</script>
+</body>
+</html>
